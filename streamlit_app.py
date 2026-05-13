@@ -2,150 +2,124 @@ import streamlit as st
 import pandas as pd
 import math
 from pathlib import Path
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import r2_score
+import yfinance as yf
 
 # Set the title and favicon that appear in the Browser's tab bar.
 st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
+    page_title='Dashboard Bolsa Colombia',
+    page_icon=':chart_with_upwards_trend:', # This is an emoji shortcode. Could be a URL too.
 )
 
 # -----------------------------------------------------------------------------
 # Declare some useful functions.
 
 @st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
+def get_stock_data(ticker, period='1y'):
+    """Grab stock data from Yahoo Finance.
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
+    This uses caching to avoid having to fetch the data every time.
     """
-
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
-
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
-
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
-    )
-
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
-
-    return gdp_df
-
-gdp_df = get_gdp_data()
+    data = yf.download(ticker, period=period)
+    data.reset_index(inplace=True)
+    return data
 
 # -----------------------------------------------------------------------------
 # Draw the actual page
 
 # Set the title that appears at the top of the page.
 '''
-# :earth_americas: GDP dashboard
+# :chart_with_upwards_trend: Dashboard Bolsa de Valores de Colombia
 
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
+Visualiza datos históricos de acciones de la Bolsa de Valores de Colombia (BVC). Incluye acciones como Celsia, ISA, GEB y más.
 '''
 
 # Add some spacing
 ''
 ''
 
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
+period = st.selectbox(
+    'Selecciona el período:',
+    ['1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'max'],
+    index=3  # Default to 1y
+)
 
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
+stocks = ['CELSIA.CO', 'ISA.CO', 'GEB.CO', 'ECOPETROL.CO', 'BANCOLOMBIA.CO']
 
-countries = gdp_df['Country Code'].unique()
-
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
+selected_stocks = st.multiselect(
+    'Selecciona las acciones que deseas ver:',
+    stocks,
+    ['CELSIA.CO', 'ISA.CO', 'GEB.CO'])
 
 ''
 ''
 ''
 
 # Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
-)
-
-''
-''
-
-
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
-
-st.header(f'GDP in {to_year}', divider='gray')
-
-''
-
-cols = st.columns(4)
-
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
-
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
-        else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
-
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
+if selected_stocks:
+    stock_data = {}
+    for stock in selected_stocks:
+        data = get_stock_data(stock, period)
+        if not data.empty:
+            data['Ticker'] = stock
+            stock_data[stock] = data
+    
+    if stock_data:
+        # Combine all data
+        combined_df = pd.concat(stock_data.values())
+        
+        st.header('Precios de Acciones a lo Largo del Tiempo', divider='gray')
+        
+        ''
+        
+        st.line_chart(
+            combined_df,
+            x='Date',
+            y='Close',
+            color='Ticker',
         )
+        
+        ''
+        ''
+        
+        st.header('Regresión Lineal para Acciones', divider='gray')
+        
+        ''
+        
+        if selected_stocks:
+            stock = selected_stocks[0]  # Usar la primera acción seleccionada
+            if stock in stock_data:
+                data = stock_data[stock].dropna()
+                
+                if len(data) > 1:
+                    # Usar el índice como X (días)
+                    data['Days'] = (data['Date'] - data['Date'].min()).dt.days
+                    X = data[['Days']]
+                    y = data['Close']
+                    
+                    model = LinearRegression()
+                    model.fit(X, y)
+                    
+                    y_pred = model.predict(X)
+                    r2 = r2_score(y, y_pred)
+                    
+                    st.write(f"**Acción:** {stock}")
+                    st.write(f"**Coeficiente (pendiente):** {model.coef_[0]:.2f}")
+                    st.write(f"**Intercepto:** {model.intercept_:.2f}")
+                    st.write(f"**R²:** {r2:.4f}")
+                    
+                    # Predicción para el próximo día
+                    next_day = data['Days'].max() + 1
+                    pred_price = model.predict([[next_day]])[0]
+                    st.write(f"**Predicción precio para mañana:** {pred_price:.2f}")
+                else:
+                    st.write("No hay suficientes datos para realizar la regresión.")
+            else:
+                st.write("No hay datos para la acción seleccionada.")
+        else:
+            st.write("Selecciona al menos una acción.")
+    else:
+        st.warning("No se pudieron obtener datos para las acciones seleccionadas.")
+else:
+    st.warning("Selecciona al menos una acción.")
